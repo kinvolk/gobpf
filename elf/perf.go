@@ -25,6 +25,8 @@ import (
 	"sort"
 	"syscall"
 	"unsafe"
+
+	"github.com/iovisor/gobpf/pkg/cpuonline"
 )
 
 /*
@@ -125,7 +127,6 @@ static int perf_event_dump_backward(int page_count, int page_size, void *_state,
 	}
 	//printf("dump_backward: done: init=%llu data_head=%llx\n", state->data_head_initialized, state->data_head);
 	begin = p = base + (state->data_head & (raw_size - 1));
-
 	if (p->type != PERF_RECORD_SAMPLE)
 		return 0;
 	//printf("dump_backward: type %d - base %x raw_size=%llx base+raw_size=%llx\n", p->type, base, raw_size, base+raw_size);
@@ -197,6 +198,52 @@ func InitPerfMap(b *Module, mapName string, receiverChan chan []byte, lostChan c
 		lostChan:     lostChan,
 		pollStop:     make(chan struct{}),
 	}, nil
+}
+
+func (pm *PerfMap) SwapAndDumpBackward() (out [][]byte) {
+	m, ok := pm.program.maps[pm.name]
+	if !ok {
+		// should not happen or only when pm.program is
+		// suddenly changed
+		panic(fmt.Sprintf("cannot find map %q", pm.name))
+	}
+
+	// step 1: create a new perf ring buffer
+	pmuFds, headers, err := createPerfRingBuffer(true, pm.pageCount)
+	if (err != nil) {
+		return
+	}
+
+	cpus, err := cpuonline.Get()
+	if err != nil {
+		return
+	}
+
+	// step 2: swap file descriptors
+	// after it the ebpf programs will write to the new map
+	for index, cpu := range cpus {
+		// assign perf fd to map
+		err := pm.program.UpdateElement(m, unsafe.Pointer(&cpu), unsafe.Pointer(&pmuFds[index]), 0)
+		if err != nil {
+			return
+		}
+	}
+
+	// step 3: dump old buffer
+	out = pm.DumpBackward()
+
+	// step4: close old buffer
+	for _, fd := range m.pmuFDs {
+		if err := syscall.Close(int(fd)); err != nil {
+			return
+		}
+	}
+
+	// update file descriptors to new perf ring buffer
+	m.pmuFDs = pmuFds
+	m.headers = headers
+
+	return
 }
 
 func (pm *PerfMap) DumpBackward() (out [][]byte) {

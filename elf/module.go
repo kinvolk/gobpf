@@ -696,6 +696,8 @@ func unpinMap(m *Map, pinPath string) error {
 }
 
 func (b *Module) closeMaps(options map[string]CloseOptions) error {
+	pageSize := os.Getpagesize()
+
 	for _, m := range b.maps {
 		doUnpin := options[fmt.Sprintf("maps/%s", m.Name)].Unpin
 		if doUnpin {
@@ -717,7 +719,26 @@ func (b *Module) closeMaps(options map[string]CloseOptions) error {
 				return fmt.Errorf("error unpinning map %q: %v", m.Name, err)
 			}
 		}
+
+		// unmap
+		mmapSize := pageSize * (m.pageCount + 1)
+
+		for _, header := range m.headers {
+			base := C.GoBytes(unsafe.Pointer(header), C.int(mmapSize))
+			err := syscall.Munmap(base)
+			if err != nil {
+				return fmt.Errorf("unmap error: %v", err)
+			}
+		}
+
 		for _, fd := range m.pmuFDs {
+			// disable
+			_, _, err2 := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), C.PERF_EVENT_IOC_DISABLE, 0)
+			if err2 != 0 {
+				return fmt.Errorf("error enabling perf event: %v", err2)
+			}
+
+			// close
 			if err := syscall.Close(int(fd)); err != nil {
 				return fmt.Errorf("error closing perf event fd: %v", err)
 			}

@@ -203,7 +203,12 @@ func InitPerfMap(b *Module, mapName string, receiverChan chan []byte, lostChan c
 	}, nil
 }
 
-func (pm *PerfMap) SwapAndDumpBackward() (out [][]byte) {
+// When the buffer overflowed and the oldest events were overwritten, the caller can construct
+// an "events lost" indicator event based on the last retained event (e.g., to use a similar timestamp).
+// The first argument is the CPU ID. On error no "events lost" indicator is appended to the list of events.
+type MakeLostEventIndicatorFromLastEvent func(uint16, [] byte) ([]byte, error)
+
+func (pm *PerfMap) SwapAndDumpBackward(makeLostEvent MakeLostEventIndicatorFromLastEvent) (out [][]byte) {
 	m, ok := pm.program.maps[pm.name]
 	if !ok {
 		// should not happen or only when pm.program is
@@ -233,7 +238,7 @@ func (pm *PerfMap) SwapAndDumpBackward() (out [][]byte) {
 	}
 
 	// step 3: dump old buffer
-	out = pm.DumpBackward()
+	out = pm.DumpBackward(makeLostEvent)
 
 	// step4: close old buffer
 	for _, fd := range m.pmuFDs {
@@ -249,7 +254,7 @@ func (pm *PerfMap) SwapAndDumpBackward() (out [][]byte) {
 	return
 }
 
-func (pm *PerfMap) DumpBackward() (out [][]byte) {
+func (pm *PerfMap) DumpBackward(makeLostEvent MakeLostEventIndicatorFromLastEvent) (out [][]byte) {
 	incoming := OrderedBytesArray{timestamp: pm.timestamp}
 
 	m, ok := pm.program.maps[pm.name]
@@ -263,6 +268,7 @@ func (pm *PerfMap) DumpBackward() (out [][]byte) {
 	pageSize := os.Getpagesize()
 	for cpu := 0; cpu < cpuCount; cpu++ {
 		state := C.struct_read_state{}
+		readBytes := 0
 	ringBufferLoop:
 		for {
 			var sample *PerfEventSample
@@ -271,8 +277,15 @@ func (pm *PerfMap) DumpBackward() (out [][]byte) {
 				unsafe.Pointer(&sample))
 			switch ok {
 			case 0:
+				fmt.Printf("%d - %d = %d\n", pm.pageCount*pageSize, readBytes, pm.pageCount * pageSize - readBytes)
+				// Finished but the buffer was full, indicating that something might have been lost
+				//indicatorEvent, err := makeLostEvent(uint16(cpu), incoming.bytesArray[len(incoming.bytesArray)-1])
+				//if err == nil {
+				//	incoming.bytesArray = append(incoming.bytesArray, indicatorEvent)
+				//}
 				break ringBufferLoop // nothing to read
 			case C.PERF_RECORD_SAMPLE:
+				readBytes = readBytes + int(sample.Size)
 				size := sample.Size - 4
 				b := C.GoBytes(unsafe.Pointer(&sample.data), C.int(size))
 				incoming.bytesArray = append(incoming.bytesArray, b)

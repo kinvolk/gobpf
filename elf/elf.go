@@ -482,11 +482,12 @@ func (b *Module) relocate(data []byte, rdata []byte) error {
 }
 
 type SectionParams struct {
-	PerfRingBufferPageCount   int
-	SkipPerfMapInitialization bool
-	PinPath                   string // path to be pinned, relative to "/sys/fs/bpf"
-	MapMaxEntries             int    // Used to override bpf map entries size
-	PerfRingBufferBackward    bool
+	PerfRingBufferPageCount    int
+	SkipPerfMapInitialization  bool
+	PinPath                    string // path to be pinned, relative to "/sys/fs/bpf"
+	MapMaxEntries              int    // Used to override bpf map entries size
+	PerfRingBufferBackward     bool
+	PerfRingBufferOverwritable bool
 }
 
 // Load loads the BPF programs and BPF maps in the module. Each ELF section
@@ -828,7 +829,7 @@ func (b *Module) Load(parameters map[string]SectionParams) error {
 	return b.initializePerfMaps(parameters)
 }
 
-func createPerfRingBuffer(backward bool, pageCount int) ([]C.int, []*C.struct_perf_event_mmap_page, error) {
+func createPerfRingBuffer(backward bool, overwriteable bool, pageCount int) ([]C.int, []*C.struct_perf_event_mmap_page, error) {
 	pageSize := os.Getpagesize()
 
 	cpus, err := cpuonline.Get()
@@ -853,7 +854,17 @@ func createPerfRingBuffer(backward bool, pageCount int) ([]C.int, []*C.struct_pe
 		// mmap
 		mmapSize := pageSize * (pageCount + 1)
 
-		base, err := syscall.Mmap(int(pmuFD), 0, mmapSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+		// The 'overwritable' bit is set via PROT_WRITE, see:
+		// https://github.com/torvalds/linux/commit/9ecda41acb971ebd07c8fb35faf24005c0baea12
+		// "By mapping without 'PROT_WRITE', an overwritable ring buffer is created."
+		var prot int
+		if overwriteable {
+			prot = syscall.PROT_READ
+		} else {
+			prot = syscall.PROT_READ | syscall.PROT_WRITE
+		}
+
+		base, err := syscall.Mmap(int(pmuFD), 0, mmapSize, prot, syscall.MAP_SHARED)
 		if err != nil {
 			return nil, nil, fmt.Errorf("mmap error: %v", err)
 		}
@@ -879,6 +890,7 @@ func (b *Module) initializePerfMaps(parameters map[string]SectionParams) error {
 
 		b.maps[name].pageCount = 8 // reasonable default
 		backward := false
+		overwriteable := false
 
 		sectionName := "maps/" + name
 		if params, ok := parameters[sectionName]; ok {
@@ -894,11 +906,13 @@ func (b *Module) initializePerfMaps(parameters map[string]SectionParams) error {
 			if params.PerfRingBufferBackward {
 				backward = true
 			}
+			if params.PerfRingBufferOverwritable {
+				overwriteable = true
+			}
 		}
 
-
-		pmuFds, headers, err := createPerfRingBuffer(backward, b.maps[name].pageCount)
-		if (err != nil) {
+		pmuFds, headers, err := createPerfRingBuffer(backward, overwriteable, b.maps[name].pageCount)
+		if err != nil {
 			return fmt.Errorf("cannot create perfring map %v", err)
 		}
 

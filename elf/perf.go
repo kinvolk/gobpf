@@ -212,14 +212,14 @@ func (pm *PerfMap) SwapAndDumpBackward() (out [][]byte) {
 	}
 
 	// step 1: create a new perf ring buffer
-	pmuFds, headers, err := createPerfRingBuffer(true, pm.pageCount)
-	if (err != nil) {
+	pmuFds, headers, err := createPerfRingBuffer(true, true, pm.pageCount)
+	if err != nil {
 		return
 	}
 
 	cpus, err := cpuonline.Get()
 	if err != nil {
-	return
+		return
 	}
 
 	// step 2: swap file descriptors

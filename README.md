@@ -1,7 +1,5 @@
 # gobpf
 
-[![Build Status](https://semaphoreci.com/api/v1/alban/gobpf-2/branches/master/badge.svg)](https://semaphoreci.com/alban/gobpf-2) [![GoDoc](https://godoc.org/github.com/golang/gddo?status.svg)](http://godoc.org/github.com/iovisor/gobpf)
-
 This repository provides go bindings for the [bcc framework](https://github.com/iovisor/bcc)
 as well as low-level routines to load and use eBPF programs from .elf
 files.
@@ -60,7 +58,7 @@ sudo -E go run examples/bcc/perf/perf.go
 
 ## Tests
 
-The `semaphore.sh` script can be used to run the tests in rkt stage1-kvm
+The `ci.sh` script can be used to run the tests in rkt stage1-kvm
 containers on different kernel versions. To run all tests on the host system,
 use `go test` as follows:
 

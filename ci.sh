@@ -2,10 +2,10 @@
 
 # Script to test gobpf
 #
-# `semaphore.sh` runs the tests in a rkt container with custom build
-# stage1-kvm images to test under different kernels.  stage1-kvm allows
-# us to run a container inside a KVM virtual machine and thus test eBPF
-# workloads, which need a modern Linux kernel and root access.
+# `ci.sh` runs the tests in a rkt container with custom build stage1-kvm images
+# to test under different kernels.  stage1-kvm allows us to run a container
+# inside a KVM virtual machine and thus test eBPF workloads, which need a
+# modern Linux kernel and root access.
 
 set -eux
 set -o pipefail
